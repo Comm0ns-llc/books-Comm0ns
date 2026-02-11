@@ -50,6 +50,35 @@ type Loan = {
   msg: string;
 };
 
+type ApiUser = {
+  id: string;
+  display_name: string;
+  avatar_url: string | null;
+  bio: string | null;
+  location: string | null;
+};
+
+type ApiUserBooksRow = {
+  status: BookStatus;
+  books:
+    | {
+        id: string;
+        title: string;
+        author: string | null;
+        publisher: string | null;
+        genre: string[] | null;
+        page_count: number | null;
+      }
+    | {
+        id: string;
+        title: string;
+        author: string | null;
+        publisher: string | null;
+        genre: string[] | null;
+        page_count: number | null;
+      }[];
+};
+
 type Route =
   | { p: "home" | "search" | "shelf" | "loans" | "profile"; t: "home" | "search" | "shelf" | "loans" | "profile" }
   | { p: "book"; id: string; t: "home" | "search" | "shelf" | "loans" | "profile" }
@@ -318,6 +347,11 @@ const LOANS: Loan[] = [
 ];
 
 const ME = USERS[0];
+
+function toAvatarLabel(name: string) {
+  const compact = name.replace(/\s+/g, "");
+  return compact.slice(0, 2).toUpperCase();
+}
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500;600;700;800&family=Zen+Kaku+Gothic+New:wght@300;400;500;700&display=swap');
@@ -662,12 +696,16 @@ function Home({
   go,
   books,
   reviews,
-  pendingCount
+  pendingCount,
+  users,
+  me
 }: {
   go: (p: "book" | "user", id: string) => void;
   books: Book[];
   reviews: Review[];
   pendingCount: number;
+  users: User[];
+  me: User;
 }) {
   const recent = [...reviews].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
 
@@ -714,7 +752,7 @@ function Home({
           }}
         >
           <p style={{ fontSize: 13, color: "var(--ink4)", fontFamily: "var(--sans)", fontWeight: 300, marginBottom: 6 }}>
-            おはよう、悠太さん
+            おはよう、{me.name}さん
           </p>
           <p style={{ fontSize: 20, color: "var(--ink)", fontFamily: "var(--serif)", fontWeight: 600, lineHeight: 1.6, letterSpacing: 0.5 }}>
             <span style={{ color: "var(--warm)", fontWeight: 800 }}>{books.length}</span>冊の本が
@@ -771,7 +809,7 @@ function Home({
           <div style={{ padding: "0 24px" }}>
             {recent.map((r, i) => {
               const b = books.find((x) => x.id === r.bookId);
-              const u = USERS.find((x) => x.id === r.userId);
+              const u = users.find((x) => x.id === r.userId);
               if (!b || !u) return null;
               return (
                 <div
@@ -818,7 +856,7 @@ function Home({
 
         <Sec title="メンバー">
           <div style={{ display: "flex", gap: 24, padding: "0 24px 24px" }}>
-            {USERS.map((u, i) => (
+            {users.map((u, i) => (
               <div key={u.id} onClick={() => go("user", u.id)} style={{ textAlign: "center", cursor: "pointer", animation: `su .4s ease-out ${i * 0.08}s both` }}>
                 <Av u={u} sz={48} />
                 <p style={{ fontSize: 11, marginTop: 6, color: "var(--ink2)", fontFamily: "var(--sans)" }}>{u.name.split(" ")[1]}</p>
@@ -973,14 +1011,14 @@ function Search({ go, books, reviews }: { go: (p: "book", id: string) => void; b
   );
 }
 
-function Shelf({ go, books }: { go: (p: "book", id: string) => void; books: Book[] }) {
+function Shelf({ go, books, me }: { go: (p: "book", id: string) => void; books: Book[]; me: User }) {
   const [open, sO] = useState(false);
-  const my = books.filter((b) => b.owners.includes(ME.id));
+  const my = books.filter((b) => b.owners.includes(me.id));
   const st = [
     { n: my.length, l: "所有" },
-    { n: my.filter((b) => b.status[ME.id] === "available").length, l: "貸出可" },
-    { n: my.filter((b) => b.status[ME.id] === "lent_out").length, l: "貸出中" },
-    { n: my.filter((b) => b.status[ME.id] === "reading").length, l: "読書中" }
+    { n: my.filter((b) => b.status[me.id] === "available").length, l: "貸出可" },
+    { n: my.filter((b) => b.status[me.id] === "lent_out").length, l: "貸出中" },
+    { n: my.filter((b) => b.status[me.id] === "reading").length, l: "読書中" }
   ];
 
   return (
@@ -1096,7 +1134,7 @@ function Shelf({ go, books }: { go: (p: "book", id: string) => void; books: Book
               >
                 {b.title}
               </p>
-              <SPill s={b.status[ME.id]} />
+              <SPill s={b.status[me.id]} />
             </div>
           ))}
         </div>
@@ -1111,6 +1149,8 @@ function BookDtl({
   back,
   books,
   reviews,
+  users,
+  me,
   hasRequested,
   onRequest
 }: {
@@ -1119,6 +1159,8 @@ function BookDtl({
   back: () => void;
   books: Book[];
   reviews: Review[];
+  users: User[];
+  me: User;
   hasRequested: boolean;
   onRequest: (bookId: string) => void;
 }) {
@@ -1127,7 +1169,7 @@ function BookDtl({
 
   const rv = reviews.filter((r) => r.bookId === id);
   const avg = rv.length ? (rv.reduce((s, r) => s + r.rating, 0) / rv.length).toFixed(1) : null;
-  const ow = b.owners.map((i) => USERS.find((u) => u.id === i)).filter(Boolean) as User[];
+  const ow = b.owners.map((i) => users.find((u) => u.id === i)).filter(Boolean) as User[];
 
   const [tab, sT] = useState<"info" | "reviews" | "owners">("info");
   const tabs = [
@@ -1212,7 +1254,7 @@ function BookDtl({
                   </div>
                 ))}
               </div>
-              {!b.owners.includes(ME.id) && (
+              {!b.owners.includes(me.id) && (
                 <button
                   onClick={() => onRequest(id)}
                   disabled={hasRequested}
@@ -1240,7 +1282,7 @@ function BookDtl({
             <>
               {!rv.length && <Emp icon="💬" text="まだ感想がありません" />}
               {rv.map((r, i) => {
-                const u = USERS.find((x) => x.id === r.userId);
+                const u = users.find((x) => x.id === r.userId);
                 if (!u) return null;
                 return (
                   <div
@@ -1298,16 +1340,22 @@ function BookDtl({
 
 function Loans({
   go,
+  books,
+  users,
+  me,
   loans,
   onLoanStatus
 }: {
   go: (p: "book", id: string) => void;
+  books: Book[];
+  users: User[];
+  me: User;
   loans: Loan[];
   onLoanStatus: (loanId: string, status: LoanStatus) => void;
 }) {
   const [tab, sT] = useState<"lending" | "borrowing">("lending");
-  const lending = loans.filter((l) => l.ownerId === ME.id);
-  const borrowing = loans.filter((l) => l.borrowerId === ME.id);
+  const lending = loans.filter((l) => l.ownerId === me.id);
+  const borrowing = loans.filter((l) => l.borrowerId === me.id);
   const list = tab === "lending" ? lending : borrowing;
 
   const si: Record<LoanStatus, string> = { requested: "⏳", approved: "✓", active: "●", returned: "✓✓", rejected: "✕" };
@@ -1357,8 +1405,8 @@ function Loans({
         <div style={{ padding: "16px 20px" }}>
           {!list.length && <Emp icon={tab === "lending" ? "📤" : "📥"} text="取引はありません" />}
           {list.map((loan, i) => {
-            const b = BOOKS.find((x) => x.id === loan.bookId);
-            const other = USERS.find((u) => u.id === (tab === "lending" ? loan.borrowerId : loan.ownerId));
+            const b = books.find((x) => x.id === loan.bookId);
+            const other = users.find((u) => u.id === (tab === "lending" ? loan.borrowerId : loan.ownerId));
             if (!b || !other) return null;
 
             return (
@@ -1490,16 +1538,20 @@ function Profile({
   go,
   back,
   books,
-  reviews
+  reviews,
+  users,
+  me
 }: {
   uid: string;
   go: (p: "book", id: string) => void;
   back: () => void;
   books: Book[];
   reviews: Review[];
+  users: User[];
+  me: User;
 }) {
-  const u = USERS.find((x) => x.id === uid) ?? ME;
-  const isMe = u.id === ME.id;
+  const u = users.find((x) => x.id === uid) ?? me;
+  const isMe = u.id === me.id;
   const uB = books.filter((b) => b.owners.includes(u.id));
   const uR = reviews.filter((r) => r.userId === u.id);
   const [tab, sT] = useState<"books" | "reviews">("books");
@@ -1717,11 +1769,25 @@ export default function CommonsApp() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [stack, setStack] = useState<Route[]>([{ p: "home", t: "home" }]);
+  const [users, setUsers] = useState<User[]>(USERS);
+  const [me, setMe] = useState<User>(ME);
   const [books, setBooks] = useState<Book[]>(BOOKS);
-  const [reviews] = useState<Review[]>(REVIEWS);
+  const [reviews, setReviews] = useState<Review[]>(REVIEWS);
   const [loans, setLoans] = useState<Loan[]>(LOANS);
   const [requestedBookIds, setRequestedBookIds] = useState<string[]>([]);
   const [isDesktop, setIsDesktop] = useState(false);
+  const [isBooting, setIsBooting] = useState(true);
+  const [isDemoMode, setIsDemoMode] = useState(false);
+
+  const resetToDemoData = useCallback(() => {
+    setUsers(USERS);
+    setMe(ME);
+    setBooks(BOOKS);
+    setReviews(REVIEWS);
+    setLoans(LOANS);
+    setRequestedBookIds([]);
+    setStack([{ p: "home", t: "home" }]);
+  }, []);
 
   useEffect(() => {
     const query = window.matchMedia("(min-width: 1180px)");
@@ -1730,6 +1796,108 @@ export default function CommonsApp() {
     query.addEventListener("change", handle);
     return () => query.removeEventListener("change", handle);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function bootstrap() {
+      try {
+        const response = await fetch("/api/users/me", { cache: "no-store" });
+        if (!response.ok) {
+          if (cancelled) return;
+          resetToDemoData();
+          setIsDemoMode(true);
+          return;
+        }
+
+        const json = (await response.json()) as { data?: ApiUser };
+        const profile = json.data;
+
+        if (!profile) {
+          if (cancelled) return;
+          resetToDemoData();
+          setIsDemoMode(true);
+          return;
+        }
+
+        const mappedBooks: Book[] = BOOKS.map((book) => ({
+          ...book,
+          owners: [...book.owners],
+          status: { ...book.status }
+        }));
+        const mappedReviews = REVIEWS.map((review) => ({ ...review }));
+        const mappedLoans = LOANS.map((loan) => ({ ...loan }));
+
+        const userBooksResponse = await fetch(`/api/users/${profile.id}/books`, { cache: "no-store" });
+        if (userBooksResponse.ok) {
+          const userBooksJson = (await userBooksResponse.json()) as { data?: ApiUserBooksRow[] };
+          for (const row of userBooksJson.data ?? []) {
+            const base = Array.isArray(row.books) ? row.books[0] : row.books;
+            if (!base) continue;
+
+            const existing = mappedBooks.find((book) => book.id === base.id);
+            if (existing) {
+              if (!existing.owners.includes(profile.id)) {
+                existing.owners = [...existing.owners, profile.id];
+              }
+              existing.status = { ...existing.status, [profile.id]: row.status };
+              continue;
+            }
+
+            mappedBooks.push({
+              id: base.id,
+              title: base.title,
+              author: base.author ?? "不明",
+              publisher: base.publisher ?? "不明",
+              genre: base.genre ?? [],
+              pages: base.page_count ?? 0,
+              owners: [profile.id],
+              status: { [profile.id]: row.status },
+              color: "#6b8f71"
+            });
+          }
+        }
+
+        const meBooks = mappedBooks.filter((book) => book.owners.includes(profile.id)).length;
+        const meLent = mappedLoans.filter((loan) => loan.ownerId === profile.id && loan.status !== "rejected").length;
+        const mappedMe: User = {
+          id: profile.id,
+          name: profile.display_name,
+          avatar: toAvatarLabel(profile.display_name),
+          bio: profile.bio ?? "プロフィールは未設定です。",
+          location: profile.location ?? "未設定",
+          books: meBooks,
+          lent: meLent,
+          color: "#6b8f71"
+        };
+
+        const mappedUsers = [mappedMe, ...USERS.filter((user) => user.id !== mappedMe.id)];
+
+        if (cancelled) return;
+        setUsers(mappedUsers);
+        setMe(mappedMe);
+        setBooks(mappedBooks);
+        setReviews(mappedReviews);
+        setLoans(mappedLoans);
+        setIsDemoMode(false);
+        setIsBooting(false);
+      } catch {
+        if (cancelled) return;
+        resetToDemoData();
+        setIsDemoMode(true);
+      } finally {
+        if (!cancelled) {
+          setIsBooting(false);
+        }
+      }
+    }
+
+    void bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resetToDemoData]);
 
   const cur = stack[stack.length - 1];
 
@@ -1745,26 +1913,29 @@ export default function CommonsApp() {
     setStack([{ p: t, t }]);
   }, []);
 
-  const handleRequest = useCallback((bookId: string) => {
-    if (requestedBookIds.includes(bookId)) return;
-    const ownerId = books.find((b) => b.id === bookId)?.owners.find((id) => id !== ME.id);
-    if (!ownerId) return;
+  const handleRequest = useCallback(
+    (bookId: string) => {
+      if (requestedBookIds.includes(bookId)) return;
+      const ownerId = books.find((b) => b.id === bookId)?.owners.find((id) => id !== me.id);
+      if (!ownerId) return;
 
-    const now = new Date().toISOString().slice(0, 10);
-    setRequestedBookIds((prev) => [...prev, bookId]);
-    setLoans((prev) => [
-      {
-        id: `l${prev.length + 1}`,
-        bookId,
-        ownerId,
-        borrowerId: ME.id,
-        status: "requested",
-        date: now,
-        msg: "貸出希望です。よろしくお願いします。"
-      },
-      ...prev
-    ]);
-  }, [books, requestedBookIds]);
+      const now = new Date().toISOString().slice(0, 10);
+      setRequestedBookIds((prev) => [...prev, bookId]);
+      setLoans((prev) => [
+        {
+          id: `l${prev.length + 1}`,
+          bookId,
+          ownerId,
+          borrowerId: me.id,
+          status: "requested",
+          date: now,
+          msg: "貸出希望です。よろしくお願いします。"
+        },
+        ...prev
+      ]);
+    },
+    [books, me.id, requestedBookIds]
+  );
 
   const handleLoanStatus = useCallback((loanId: string, status: LoanStatus) => {
     const loan = loans.find((l) => l.id === loanId);
@@ -1811,20 +1982,37 @@ export default function CommonsApp() {
   const debugMode: UIMode = modeParam === "mobile" || modeParam === "web" ? modeParam : "auto";
   const effectiveMode: "mobile" | "web" = debugMode === "auto" ? (isDesktop ? "web" : "mobile") : debugMode;
 
-  const pendingCount = loans.filter((l) => l.ownerId === ME.id && l.status === "requested").length;
+  const pendingCount = loans.filter((l) => l.ownerId === me.id && l.status === "requested").length;
+
+  const handleLogout = useCallback(async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    resetToDemoData();
+    setIsDemoMode(true);
+  }, [resetToDemoData]);
+
+  if (isBooting) {
+    return (
+      <>
+        <style>{CSS}</style>
+        <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: "var(--ink3)", fontFamily: "var(--sans)" }}>
+          ログイン情報を確認しています...
+        </div>
+      </>
+    );
+  }
 
   const render = () => {
     switch (cur.p) {
       case "home":
-        return <Home go={go} books={books} reviews={reviews} pendingCount={pendingCount} />;
+        return <Home go={go} books={books} reviews={reviews} pendingCount={pendingCount} users={users} me={me} />;
       case "search":
         return <Search go={(p, id) => go(p, id)} books={books} reviews={reviews} />;
       case "shelf":
-        return <Shelf go={(p, id) => go(p, id)} books={books} />;
+        return <Shelf go={(p, id) => go(p, id)} books={books} me={me} />;
       case "loans":
-        return <Loans go={(p, id) => go(p, id)} loans={loans} onLoanStatus={handleLoanStatus} />;
+        return <Loans go={(p, id) => go(p, id)} books={books} users={users} me={me} loans={loans} onLoanStatus={handleLoanStatus} />;
       case "profile":
-        return <Profile uid={ME.id} go={(p, id) => go(p, id)} back={back} books={books} reviews={reviews} />;
+        return <Profile uid={me.id} go={(p, id) => go(p, id)} back={back} books={books} reviews={reviews} users={users} me={me} />;
       case "book":
         return (
           <BookDtl
@@ -1833,14 +2021,16 @@ export default function CommonsApp() {
             back={back}
             books={books}
             reviews={reviews}
+            users={users}
+            me={me}
             hasRequested={requestedBookIds.includes(cur.id)}
             onRequest={handleRequest}
           />
         );
       case "user":
-        return <Profile uid={cur.id} go={(p, id) => go(p, id)} back={back} books={books} reviews={reviews} />;
+        return <Profile uid={cur.id} go={(p, id) => go(p, id)} back={back} books={books} reviews={reviews} users={users} me={me} />;
       default:
-        return <Home go={go} books={books} reviews={reviews} pendingCount={pendingCount} />;
+        return <Home go={go} books={books} reviews={reviews} pendingCount={pendingCount} users={users} me={me} />;
     }
   };
 
@@ -1851,6 +2041,74 @@ export default function CommonsApp() {
     <>
       <style>{CSS}</style>
       <UiModeSwitcher mode={debugMode} onChange={setUiMode} />
+      <div
+        style={{
+          position: "fixed",
+          top: 58,
+          right: 12,
+          zIndex: 180,
+          display: "flex",
+          gap: 8,
+          padding: 8,
+          borderRadius: 10,
+          background: "rgba(28,25,23,.72)",
+          backdropFilter: "blur(10px)"
+        }}
+      >
+        {isDemoMode ? (
+          <>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,.88)", alignSelf: "center", whiteSpace: "nowrap" }}>
+              デモモード
+            </span>
+            <button
+              onClick={() => router.push("/login")}
+              style={{
+                border: "none",
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+                borderRadius: 8,
+                padding: "7px 10px",
+                color: "#1c1917",
+                background: "#faf9f7"
+              }}
+            >
+              ログイン
+            </button>
+            <button
+              onClick={() => router.push("/invite")}
+              style={{
+                border: "1px solid rgba(255,255,255,.45)",
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+                borderRadius: 8,
+                padding: "7px 10px",
+                color: "#fff",
+                background: "transparent"
+              }}
+            >
+              新規登録
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => void handleLogout()}
+            style={{
+              border: "1px solid rgba(255,255,255,.45)",
+              cursor: "pointer",
+              fontSize: 11,
+              fontWeight: 700,
+              borderRadius: 8,
+              padding: "7px 10px",
+              color: "#fff",
+              background: "transparent"
+            }}
+          >
+            ログアウト
+          </button>
+        )}
+      </div>
 
       {effectiveMode === "mobile" && (
         <PhoneShell routeKey={routeKey} rendered={rendered} currentTab={cur.t} onTab={tab} />
@@ -1860,8 +2118,8 @@ export default function CommonsApp() {
         <div style={{ minHeight: "100vh", background: "radial-gradient(circle at 20% 10%, #f4efe6 0%, #e6e1d8 45%, #ded8ce 100%)" }}>
           <WebDesktopExperience
             cur={cur}
-            users={USERS}
-            me={ME}
+            users={users}
+            me={me}
             books={books}
             reviews={reviews}
             loans={loans}

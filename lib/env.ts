@@ -1,17 +1,18 @@
-const required = [
-  "NEXT_PUBLIC_SUPABASE_URL",
-  "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-  "SUPABASE_SERVICE_ROLE_KEY"
-] as const;
+type RequiredEnvKey =
+  | "NEXT_PUBLIC_SUPABASE_URL"
+  | "NEXT_PUBLIC_SUPABASE_ANON_KEY"
+  | "SUPABASE_SERVICE_ROLE_KEY";
 
-for (const key of required) {
-  if (!process.env[key]) {
-    console.warn(`[env] Missing ${key}`);
+function getRequiredEnv(key: RequiredEnvKey): string {
+  const value = process.env[key];
+  if (!value) {
+    throw new Error(`[env] Missing required environment variable: ${key}`);
   }
+  return value;
 }
 
 export const env = {
-  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-  supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
-  supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
+  supabaseUrl: getRequiredEnv("NEXT_PUBLIC_SUPABASE_URL"),
+  supabaseAnonKey: getRequiredEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+  supabaseServiceKey: getRequiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 };

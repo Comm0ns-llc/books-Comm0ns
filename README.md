@@ -64,6 +64,10 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
 ```
 
+- `NEXT_PUBLIC_SUPABASE_URL`: Supabase Project Settings > API > Project URL
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase Project Settings > API > Project API keys > `anon` `public`
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabase Project Settings > API > Project API keys > `service_role` `secret`
+
 3. SupabaseにSQLを適用
 
 - `db/migrations/0001_init.sql`
@@ -110,3 +114,7 @@ docs/                設計・コンセプト資料
 3. UIの実データ連携（モック依存の縮小）
 4. 通知・DMのRealtime対応
 5. E2E / RLS統合テスト整備
+
+## メモ
+
+- 招待コード機能は将来実装予定です。現在の新規登録では招待コード未入力でも登録可能です（入力時のみ検証）。

@@ -25,7 +25,8 @@ export async function PATCH(request: Request) {
   if (error || !user || !supabase) return error;
 
   const parsed = await parseBody(request, updateSchema);
-  if (parsed.error || !parsed.data) return parsed.error;
+  if (parsed.error) return parsed.error;
+  if (!parsed.data) return fail("Invalid request body", 422);
 
   const payload: Record<string, unknown> = {};
   if (parsed.data.displayName !== undefined) payload.display_name = parsed.data.displayName;

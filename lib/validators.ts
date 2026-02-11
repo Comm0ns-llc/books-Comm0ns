@@ -4,7 +4,14 @@ export const signUpSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   displayName: z.string().min(1).max(50),
-  inviteCode: z.string().min(4).max(20)
+  inviteCode: z
+    .string()
+    .trim()
+    .min(4)
+    .max(20)
+    .optional()
+    .or(z.literal(""))
+    .transform((value) => (value ? value : undefined))
 });
 
 export const loginSchema = z.object({
