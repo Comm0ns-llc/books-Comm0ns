@@ -17,7 +17,8 @@ export async function PATCH(request: Request, { params }: Params) {
   if (error || !supabase) return error;
 
   const parsed = await parseBody(request, patchSchema);
-  if (parsed.error || !parsed.data) return parsed.error;
+  if (parsed.error) return parsed.error;
+  if (!parsed.data) return fail("Invalid request body", 422);
 
   const { data, error: updateError } = await supabase
     .from("user_books")

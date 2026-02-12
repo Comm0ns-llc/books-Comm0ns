@@ -11,7 +11,8 @@ export async function PATCH(request: Request, { params }: Params) {
   if (error || !supabase) return error;
 
   const parsed = await parseBody(request, reviewSchema.partial());
-  if (parsed.error || !parsed.data) return parsed.error;
+  if (parsed.error) return parsed.error;
+  if (!parsed.data) return fail("Invalid request body", 422);
 
   const payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (parsed.data.rating !== undefined) payload.rating = parsed.data.rating;

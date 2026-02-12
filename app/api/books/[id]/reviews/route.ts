@@ -26,7 +26,8 @@ export async function POST(request: Request, { params }: Params) {
   if (error || !user || !supabase) return error;
 
   const parsed = await parseBody(request, reviewSchema);
-  if (parsed.error || !parsed.data) return parsed.error;
+  if (parsed.error) return parsed.error;
+  if (!parsed.data) return fail("Invalid request body", 422);
 
   const { data, error: insertError } = await supabase
     .from("reviews")

@@ -8,7 +8,8 @@ export async function POST(request: Request) {
   if (error || !user || !supabase) return error;
 
   const parsed = await parseBody(request, loanRequestSchema);
-  if (parsed.error || !parsed.data) return parsed.error;
+  if (parsed.error) return parsed.error;
+  if (!parsed.data) return fail("Invalid request body", 422);
 
   const { data: loan, error: loanError } = await supabase
     .from("loans")
