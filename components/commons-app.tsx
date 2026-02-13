@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import WebDesktopExperience from "@/components/commons-web-desktop";
 
@@ -38,6 +38,21 @@ type Review = {
   date: string;
 };
 
+type GlobalSearchBook = {
+  id: string | null;
+  isbn: string | null;
+  title: string;
+  author: string | null;
+  publisher: string | null;
+  cover_url: string | null;
+  page_count: number | null;
+  genre: string[];
+  inCommons: boolean;
+  commonsCopies: number;
+  availableCount: number;
+  source: "commons" | "google" | "mixed";
+};
+
 type LoanStatus = "requested" | "approved" | "active" | "returned" | "rejected";
 
 type Loan = {
@@ -56,6 +71,7 @@ type ApiUser = {
   avatar_url: string | null;
   bio: string | null;
   location: string | null;
+  status?: "unverified" | "active";
 };
 
 type ApiUserBooksRow = {
@@ -874,9 +890,82 @@ function Search({ go, books, reviews }: { go: (p: "book", id: string) => void; b
   const [q, sQ] = useState("");
   const [g, sG] = useState("all");
   const [onlyAvailable, setOnlyAvailable] = useState(false);
+  const [results, setResults] = useState<GlobalSearchBook[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [addingKey, setAddingKey] = useState<string | null>(null);
   const gs = ["all", "文学", "SF", "ノンフィクション", "古典", "哲学", "現代小説"];
 
-  const res = useMemo(
+  useEffect(() => {
+    let cancelled = false;
+    async function search() {
+      const query = q.trim();
+      if (!query) {
+        setResults([]);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+
+      const response = await fetch(`/api/books/search?q=${encodeURIComponent(query)}`, { cache: "no-store" });
+      const json = (await response.json().catch(() => null)) as { data?: GlobalSearchBook[]; error?: string } | null;
+      if (cancelled) return;
+
+      if (!response.ok) {
+        setError(json?.error ?? "検索に失敗しました。");
+        setLoading(false);
+        return;
+      }
+
+      setResults(json?.data ?? []);
+      setLoading(false);
+    }
+
+    void search();
+    return () => {
+      cancelled = true;
+    };
+  }, [q]);
+
+  async function addToCommons(book: GlobalSearchBook) {
+    if (!book.isbn) {
+      setError("ISBNが無い書籍はこの画面から追加できません。");
+      return;
+    }
+    const key = book.isbn ?? book.title;
+    setAddingKey(key);
+    setError(null);
+
+    const importRes = await fetch(`/api/books/isbn/${book.isbn}`, { cache: "no-store" });
+    const importJson = (await importRes.json().catch(() => null)) as { data?: { id?: string }; error?: string } | null;
+    if (!importRes.ok || !importJson?.data?.id) {
+      setError(importJson?.error ?? "書籍情報の取り込みに失敗しました。");
+      setAddingKey(null);
+      return;
+    }
+
+    const addRes = await fetch("/api/user-books", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bookId: importJson.data.id,
+        status: "available",
+        condition: "good"
+      })
+    });
+    const addJson = (await addRes.json().catch(() => null)) as { error?: string } | null;
+    if (!addRes.ok) {
+      setError(addJson?.error ?? "本棚への追加に失敗しました。");
+      setAddingKey(null);
+      return;
+    }
+
+    setAddingKey(null);
+    go("book", importJson.data.id);
+  }
+
+  const localFallback = useMemo(
     () =>
       books.filter((b) => {
         const mq = !q || b.title.includes(q) || b.author.includes(q);
@@ -886,6 +975,18 @@ function Search({ go, books, reviews }: { go: (p: "book", id: string) => void; b
       }),
     [books, g, onlyAvailable, q]
   );
+
+  const remoteFiltered = useMemo(
+    () =>
+      results.filter((b) => {
+        const mg = g === "all" || (b.genre ?? []).includes(g);
+        const ma = !onlyAvailable || b.availableCount > 0;
+        return mg && ma;
+      }),
+    [g, onlyAvailable, results]
+  );
+
+  const showingRemote = q.trim().length > 0;
 
   return (
     <div>
@@ -960,8 +1061,13 @@ function Search({ go, books, reviews }: { go: (p: "book", id: string) => void; b
           </button>
         </div>
         <div style={{ padding: "0 20px" }}>
-          <p style={{ fontSize: 11, color: "var(--ink4)", marginBottom: 12, fontFamily: "var(--sans)" }}>{res.length}件</p>
-          {res.map((b, i) => {
+          <p style={{ fontSize: 11, color: "var(--ink4)", marginBottom: 12, fontFamily: "var(--sans)" }}>
+            {showingRemote ? remoteFiltered.length : localFallback.length}件
+          </p>
+          {error && <p style={{ fontSize: 12, color: "var(--red)", marginBottom: 10 }}>{error}</p>}
+          {loading && showingRemote && <p style={{ fontSize: 12, color: "var(--ink4)", marginBottom: 10 }}>検索中...</p>}
+          {!showingRemote &&
+            localFallback.map((b, i) => {
             const rv = reviews.filter((r) => r.bookId === b.id);
             const av = rv.length ? rv.reduce((s, r) => s + r.rating, 0) / rv.length : 0;
             const ac = Object.values(b.status).filter((s) => s === "available").length;
@@ -1004,7 +1110,72 @@ function Search({ go, books, reviews }: { go: (p: "book", id: string) => void; b
               </div>
             );
           })}
-          {!res.length && <Emp icon="📭" text="該当する本が見つかりません" />}
+          {showingRemote &&
+            remoteFiltered.map((b, i) => (
+              <div
+                key={(b.isbn ?? b.title) + i}
+                onClick={() => {
+                  if (b.id) go("book", b.id);
+                }}
+                style={{
+                  display: "flex",
+                  gap: 16,
+                  padding: "16px 0",
+                  borderBottom: "1px solid var(--bg3)",
+                  cursor: b.id ? "pointer" : "default",
+                  animation: `fi .3s ease-out ${i * 0.04}s both`
+                }}
+              >
+                <div style={{ width: 48, height: 70, borderRadius: 4, background: "var(--bg3)", overflow: "hidden", flexShrink: 0 }}>
+                  {b.cover_url ? (
+                    <img src={b.cover_url} alt={b.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : null}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)", fontFamily: "var(--serif)", marginBottom: 3 }}>{b.title}</p>
+                  <p style={{ fontSize: 12, color: "var(--ink4)", fontFamily: "var(--sans)", fontWeight: 300, marginBottom: 8 }}>
+                    {b.author ?? "著者不明"} · {b.publisher ?? "出版社不明"}
+                  </p>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                    {b.inCommons ? (
+                      <>
+                        <Pill c="var(--grn)" bg="var(--grn-bg)">Comm0ns所蔵 {b.commonsCopies}冊</Pill>
+                        <Pill c="var(--blu)" bg="var(--blu-bg)">貸出可 {b.availableCount}冊</Pill>
+                      </>
+                    ) : (
+                      <Pill c="var(--ink4)" bg="var(--bg3)">Comm0ns未保持</Pill>
+                    )}
+                    {(b.genre ?? []).slice(0, 2).map((x) => (
+                      <Pill key={x}>{x}</Pill>
+                    ))}
+                  </div>
+                  {!b.id && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void addToCommons(b);
+                      }}
+                      disabled={addingKey === (b.isbn ?? b.title)}
+                      style={{
+                        border: "none",
+                        borderRadius: 8,
+                        background: "var(--ink)",
+                        color: "#fff",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        padding: "7px 12px",
+                        cursor: "pointer",
+                        opacity: addingKey === (b.isbn ?? b.title) ? 0.65 : 1
+                      }}
+                    >
+                      {addingKey === (b.isbn ?? b.title) ? "追加中..." : "Comm0nsに追加"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          {!showingRemote && !localFallback.length && <Emp icon="📭" text="該当する本が見つかりません" />}
+          {showingRemote && !loading && !remoteFiltered.length && <Emp icon="📭" text="該当する本が見つかりません" />}
         </div>
       </div>
     </div>
@@ -1013,6 +1184,11 @@ function Search({ go, books, reviews }: { go: (p: "book", id: string) => void; b
 
 function Shelf({ go, books, me }: { go: (p: "book", id: string) => void; books: Book[]; me: User }) {
   const [open, sO] = useState(false);
+  const [isbnInput, setIsbnInput] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addMessage, setAddMessage] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const my = books.filter((b) => b.owners.includes(me.id));
   const st = [
     { n: my.length, l: "所有" },
@@ -1020,6 +1196,97 @@ function Shelf({ go, books, me }: { go: (p: "book", id: string) => void; books: 
     { n: my.filter((b) => b.status[me.id] === "lent_out").length, l: "貸出中" },
     { n: my.filter((b) => b.status[me.id] === "reading").length, l: "読書中" }
   ];
+
+  async function addByIsbn(isbnRaw: string) {
+    const isbn = isbnRaw.replace(/[^0-9Xx]/g, "");
+    if (!isbn) return null;
+
+    const importRes = await fetch(`/api/books/isbn/${isbn}`, { cache: "no-store" });
+    const importJson = (await importRes.json().catch(() => null)) as { data?: { id?: string }; error?: string } | null;
+    if (!importRes.ok || !importJson?.data?.id) {
+      throw new Error(importJson?.error ?? `${isbn} の取り込みに失敗しました`);
+    }
+
+    const addRes = await fetch("/api/user-books", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bookId: importJson.data.id,
+        status: "available",
+        condition: "good"
+      })
+    });
+    const addJson = (await addRes.json().catch(() => null)) as { error?: string } | null;
+    if (!addRes.ok) {
+      if ((addJson?.error ?? "").toLowerCase().includes("duplicate")) {
+        return importJson.data.id;
+      }
+      throw new Error(addJson?.error ?? `${isbn} を本棚に追加できませんでした`);
+    }
+
+    return importJson.data.id;
+  }
+
+  async function handleManualAdd() {
+    setAdding(true);
+    setAddError(null);
+    setAddMessage(null);
+    try {
+      const id = await addByIsbn(isbnInput);
+      if (!id) throw new Error("ISBNを入力してください");
+      setAddMessage("本を追加しました。");
+      setIsbnInput("");
+      go("book", id);
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : "追加に失敗しました");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function handleShelfPhoto(file: File) {
+    setAdding(true);
+    setAddError(null);
+    setAddMessage(null);
+    try {
+      const Detector = (window as unknown as { BarcodeDetector?: new (opts?: { formats?: string[] }) => { detect: (source: ImageBitmap) => Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
+      if (!Detector) {
+        throw new Error("このブラウザは画像バーコード検出に未対応です。ISBN手入力をご利用ください。");
+      }
+
+      const detector = new Detector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
+      const bitmap = await createImageBitmap(file);
+      const codes = await detector.detect(bitmap);
+      const isbns = Array.from(
+        new Set(
+          codes
+            .map((code) => code.rawValue ?? "")
+            .map((value) => value.replace(/[^0-9Xx]/g, ""))
+            .filter((value) => value.length === 13 || value.length === 10)
+        )
+      );
+
+      if (isbns.length === 0) {
+        throw new Error("画像からISBNバーコードを検出できませんでした。");
+      }
+
+      let success = 0;
+      for (const isbn of isbns) {
+        try {
+          await addByIsbn(isbn);
+          success += 1;
+        } catch {
+          // continue with next isbn
+        }
+      }
+      setAddMessage(`画像から ${isbns.length} 件検出し、${success} 件追加しました。`);
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : "写真からの追加に失敗しました");
+    } finally {
+      setAdding(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
 
   return (
     <div>
@@ -1059,6 +1326,7 @@ function Shelf({ go, books, me }: { go: (p: "book", id: string) => void; books: 
           >
             <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 14, color: "var(--ink)", fontFamily: "var(--sans)" }}>本を追加</p>
             <button
+              onClick={() => fileRef.current?.click()}
               style={{
                 width: "100%",
                 padding: 16,
@@ -1073,11 +1341,25 @@ function Shelf({ go, books, me }: { go: (p: "book", id: string) => void; books: 
                 marginBottom: 10
               }}
             >
-              📷 バーコードをスキャン
+              📷 本棚写真から一括追加
             </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  void handleShelfPhoto(file);
+                }
+              }}
+            />
             <div style={{ display: "flex", gap: 8 }}>
               <input
                 placeholder="ISBN を入力"
+                value={isbnInput}
+                onChange={(e) => setIsbnInput(e.target.value)}
                 style={{
                   flex: 1,
                   padding: "10px 14px",
@@ -1089,6 +1371,8 @@ function Shelf({ go, books, me }: { go: (p: "book", id: string) => void; books: 
                 }}
               />
               <button
+                onClick={() => void handleManualAdd()}
+                disabled={adding}
                 style={{
                   padding: "10px 20px",
                   border: "none",
@@ -1098,12 +1382,15 @@ function Shelf({ go, books, me }: { go: (p: "book", id: string) => void; books: 
                   fontSize: 13,
                   cursor: "pointer",
                   fontWeight: 600,
-                  whiteSpace: "nowrap"
+                  whiteSpace: "nowrap",
+                  opacity: adding ? 0.65 : 1
                 }}
               >
-                検索
+                {adding ? "処理中..." : "追加"}
               </button>
             </div>
+            {addError && <p style={{ marginTop: 10, fontSize: 12, color: "var(--red)" }}>{addError}</p>}
+            {addMessage && <p style={{ marginTop: 10, fontSize: 12, color: "var(--grn)" }}>{addMessage}</p>}
           </div>
         )}
         <div style={{ display: "flex", padding: "20px 20px 0", gap: 8 }}>
@@ -1765,10 +2052,16 @@ function PhoneShell({
 }
 
 export default function CommonsApp() {
+  return <CommonsAppInner initialTab="home" />;
+}
+
+type MainTab = "home" | "search" | "shelf" | "loans" | "profile";
+
+export function CommonsAppInner({ initialTab }: { initialTab: MainTab }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [stack, setStack] = useState<Route[]>([{ p: "home", t: "home" }]);
+  const [stack, setStack] = useState<Route[]>([{ p: initialTab, t: initialTab }]);
   const [users, setUsers] = useState<User[]>(USERS);
   const [me, setMe] = useState<User>(ME);
   const [books, setBooks] = useState<Book[]>(BOOKS);
@@ -1909,7 +2202,7 @@ export default function CommonsApp() {
     setStack((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
   }, []);
 
-  const tab = useCallback((t: "home" | "search" | "shelf" | "loans" | "profile") => {
+  const tab = useCallback((t: MainTab) => {
     setStack([{ p: t, t }]);
   }, []);
 
@@ -2092,21 +2385,38 @@ export default function CommonsApp() {
             </button>
           </>
         ) : (
-          <button
-            onClick={() => void handleLogout()}
-            style={{
-              border: "1px solid rgba(255,255,255,.45)",
-              cursor: "pointer",
-              fontSize: 11,
-              fontWeight: 700,
-              borderRadius: 8,
-              padding: "7px 10px",
-              color: "#fff",
-              background: "transparent"
-            }}
-          >
-            ログアウト
-          </button>
+          <>
+            <button
+              onClick={() => router.push("/places")}
+              style={{
+                border: "1px solid rgba(255,255,255,.45)",
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+                borderRadius: 8,
+                padding: "7px 10px",
+                color: "#fff",
+                background: "transparent"
+              }}
+            >
+              場所
+            </button>
+            <button
+              onClick={() => void handleLogout()}
+              style={{
+                border: "1px solid rgba(255,255,255,.45)",
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+                borderRadius: 8,
+                padding: "7px 10px",
+                color: "#fff",
+                background: "transparent"
+              }}
+            >
+              ログアウト
+            </button>
+          </>
         )}
       </div>
 

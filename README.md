@@ -4,6 +4,7 @@
 本という「知の資産」を媒介に、リソースの共有とコミュニティの交流を促進する分散型図書館システムを目指します。
 
 - コンセプト詳細: `/Users/tsukuru/Dev/myprojects/comm0ns/books-comm0ns2/docs/CONCEPT.md`
+- 構成整理: `/Users/tsukuru/Dev/myprojects/comm0ns/books-comm0ns2/docs/APP_STRUCTURE.md`
 
 ## プロダクト概要
 
@@ -73,6 +74,7 @@ SUPABASE_SERVICE_ROLE_KEY=...
 - `db/migrations/0001_init.sql`
 - `db/migrations/0002_rls.sql`
 - `db/migrations/0003_functions.sql`
+- `db/migrations/0004_relationships_places.sql`
 
 4. 開発サーバー起動
 

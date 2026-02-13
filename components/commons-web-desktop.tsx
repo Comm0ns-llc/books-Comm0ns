@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, type ReactNode, useMemo, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useState } from "react";
 
 type User = {
   id: string;
@@ -46,6 +46,21 @@ type Loan = {
   status: LoanStatus;
   date: string;
   msg: string;
+};
+
+type GlobalSearchBook = {
+  id: string | null;
+  isbn: string | null;
+  title: string;
+  author: string | null;
+  publisher: string | null;
+  cover_url: string | null;
+  page_count: number | null;
+  genre: string[];
+  inCommons: boolean;
+  commonsCopies: number;
+  availableCount: number;
+  source: "commons" | "google" | "mixed";
 };
 
 type Route =
@@ -433,13 +448,49 @@ function PageHome({
 function PageSearch({ go, books, reviews }: { go: (p: "book", id: string) => void; books: Book[]; reviews: Review[] }) {
   const [q, sQ] = useState("");
   const [g, sG] = useState("all");
+  const [remoteResults, setRemoteResults] = useState<GlobalSearchBook[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const genres = ["all", "文学", "SF", "ノンフィクション", "古典", "哲学", "現代小説", "児童文学", "歴史", "自己啓発"];
 
-  const results = useMemo(() => books.filter((b) => {
-    const mq = !q || b.title.includes(q) || b.author.includes(q);
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchRemote() {
+      const query = q.trim();
+      if (!query) {
+        setRemoteResults([]);
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      const response = await fetch(`/api/books/search?q=${encodeURIComponent(query)}`, { cache: "no-store" });
+      const json = (await response.json().catch(() => null)) as { data?: GlobalSearchBook[]; error?: string } | null;
+      if (cancelled) return;
+      if (!response.ok) {
+        setError(json?.error ?? "検索に失敗しました。");
+        setLoading(false);
+        return;
+      }
+      setRemoteResults(json?.data ?? []);
+      setLoading(false);
+    }
+    void fetchRemote();
+    return () => {
+      cancelled = true;
+    };
+  }, [q]);
+
+  const localResults = useMemo(() => books.filter((b) => {
+    const mq = !q.trim() || b.title.includes(q) || b.author.includes(q);
     const mg = g === "all" || b.genre.includes(g);
     return mq && mg;
   }), [books, g, q]);
+
+  const showingRemote = q.trim().length > 0;
+  const filteredRemote = useMemo(
+    () => remoteResults.filter((item) => g === "all" || (item.genre ?? []).includes(g)),
+    [g, remoteResults]
+  );
 
   return (
     <div style={{ animation: "fi .3s ease-out" }}>
@@ -460,9 +511,11 @@ function PageSearch({ go, books, reviews }: { go: (p: "book", id: string) => voi
       </div>
 
       <div style={{ padding: "0 40px 40px" }}>
-        <p style={{ fontSize: 12, color: "var(--i4)", marginBottom: 16 }}>{results.length}件</p>
+        <p style={{ fontSize: 12, color: "var(--i4)", marginBottom: 16 }}>{showingRemote ? filteredRemote.length : localResults.length}件</p>
+        {error && <p style={{ fontSize: 12, color: "var(--rd)", marginBottom: 10 }}>{error}</p>}
+        {loading && showingRemote && <p style={{ fontSize: 12, color: "var(--i4)", marginBottom: 10 }}>検索中...</p>}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
-          {results.map((b, i) => {
+          {!showingRemote && localResults.map((b, i) => {
             const rv = reviews.filter((r) => r.bookId === b.id);
             const avg = rv.length ? rv.reduce((s, r) => s + r.rating, 0) / rv.length : 0;
             const ac = Object.values(b.status).filter((s) => s === "available").length;
@@ -482,8 +535,31 @@ function PageSearch({ go, books, reviews }: { go: (p: "book", id: string) => voi
               </Card>
             );
           })}
+          {showingRemote && filteredRemote.map((b, i) => (
+            <Card key={(b.isbn ?? b.title) + i} onClick={() => b.id && go("book", b.id)} style={{ display: "flex", gap: 16, animation: `su .3s ease-out ${i * 0.03}s both` }}>
+              <div style={{ width: 52, height: 76, borderRadius: 4, background: "var(--b3)", overflow: "hidden", flexShrink: 0 }}>
+                {b.cover_url ? <img src={b.cover_url} alt={b.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 15, fontWeight: 600, color: "var(--i)", fontFamily: "var(--se)", marginBottom: 3 }}>{b.title}</p>
+                <p style={{ fontSize: 12, color: "var(--i4)", fontWeight: 300, marginBottom: 8 }}>{b.author ?? "著者不明"} · {b.publisher ?? "出版社不明"}</p>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  {b.inCommons ? (
+                    <>
+                      <Pill c="var(--g)" bg="var(--gb)">Comm0ns所蔵 {b.commonsCopies}冊</Pill>
+                      <Pill c="var(--bl)" bg="var(--blb)">貸出可 {b.availableCount}冊</Pill>
+                    </>
+                  ) : (
+                    <Pill c="var(--i4)" bg="var(--b3)">Comm0ns未保持</Pill>
+                  )}
+                  {(b.genre ?? []).slice(0, 2).map((x) => <Pill key={x}>{x}</Pill>)}
+                </div>
+              </div>
+            </Card>
+          ))}
         </div>
-        {results.length === 0 && <Empty icon="📭" text="該当する本が見つかりません" />}
+        {!showingRemote && localResults.length === 0 && <Empty icon="📭" text="該当する本が見つかりません" />}
+        {showingRemote && !loading && filteredRemote.length === 0 && <Empty icon="📭" text="該当する本が見つかりません" />}
       </div>
     </div>
   );

@@ -42,3 +42,16 @@ export const messageSchema = z.object({
   body: z.string().min(1).max(2000),
   loanId: z.string().uuid().optional()
 });
+
+export const placeCreateSchema = z.object({
+  name: z.string().min(1).max(120),
+  type: z.enum(["home", "share_house", "office", "community_space", "other"]).default("other"),
+  area: z.string().max(120).optional(),
+  address: z.string().max(300).optional(),
+  description: z.string().max(1000).optional()
+});
+
+export const placeMemberCreateSchema = z.object({
+  userId: z.string().uuid(),
+  role: z.enum(["admin", "member"]).default("member")
+});
